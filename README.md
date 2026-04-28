@@ -86,6 +86,18 @@ This means two processes calling `get_guesty_token()` simultaneously will
 only ever issue one HTTP request — the second caller waits for the lock, then
 reads the token the first caller already wrote.
 
+## Currently using the broker
+
+All three Guesty consumers in the SCMaine workspace migrated to the broker on **2026-04-28**:
+
+| Consumer | Migration commit | Notes |
+|---|---|---|
+| `scmaine-ops-portal` (Helm cron) | `0cf724e` | Plus `def305a` pinning to GitHub SHA in requirements.txt |
+| `proactive-scheduling` | `f344728` | CI cache wired via `actions/cache` keyed by `github.run_id` |
+| `guest-comms-intelligence` | `cc85c45` | Guesty side only; Breezeway collector uses Playwright JWT (no OAuth) |
+
+`str-daily-briefing` is NOT a consumer — it parses Guesty *emails*, no OAuth flow. Future tools that call Guesty or Breezeway MUST use the broker; per-project OAuth flows are explicitly forbidden in `~/CLAUDE.md` "Shared API Token Broker."
+
 ## Warning: live API calls in CI burn Guesty budget
 
 Running tests against the live Guesty API in CI will consume one of your 5
