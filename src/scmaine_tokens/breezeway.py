@@ -163,14 +163,24 @@ def _parse_auth_response(resp: httpx.Response) -> Tuple[str, str, int, int]:
             "request per minute."
         )
     if resp.status_code not in (200, 201):
+        # Redact response body — never include raw upstream text in
+        # exceptions that may surface in logs / Sentry / CI output.
         raise TokenFetchError(
-            f"Breezeway auth failed (status={resp.status_code}): "
-            f"{resp.text[:300]}"
+            f"Breezeway auth failed (status={resp.status_code}). "
+            f"Response body redacted (length={len(resp.text)} chars)."
         )
-    data = resp.json()
+    try:
+        data = resp.json()
+    except (ValueError, TypeError):
+        raise TokenFetchError(
+            "Breezeway auth response was not valid JSON (body redacted)."
+        )
+    if not isinstance(data, dict):
+        raise TokenFetchError("Breezeway auth response was not a JSON object.")
     if "access_token" not in data or "refresh_token" not in data:
         raise TokenFetchError(
-            f"Breezeway auth response missing access_token/refresh_token: {data}"
+            f"Breezeway auth response missing access_token/refresh_token. "
+            f"Response keys: {sorted(data.keys())} (values redacted)."
         )
     access = data["access_token"]
     refresh = data["refresh_token"]

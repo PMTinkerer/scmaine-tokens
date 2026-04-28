@@ -22,6 +22,12 @@ def _resolve_cache_dir() -> pathlib.Path:
     else:
         path = pathlib.Path.home() / ".cache" / "scmaine-tokens"
     path.mkdir(parents=True, exist_ok=True)
+    # Defense-in-depth: lock the directory down to owner-only so even
+    # `ls` from another user can't enumerate cached source names.
+    try:
+        os.chmod(path, 0o700)
+    except OSError:
+        pass
     return path
 
 
@@ -46,6 +52,10 @@ class FileCache:
         unaffected by the lock fd.
         """
         self._lock_path.parent.mkdir(parents=True, exist_ok=True)
+        try:
+            os.chmod(self._lock_path.parent, 0o700)
+        except OSError:
+            pass
         fd = os.open(str(self._lock_path), os.O_CREAT | os.O_RDWR, 0o600)
         deadline = time.monotonic() + timeout_s
         try:
@@ -83,6 +93,10 @@ class FileCache:
     def write(self, data: dict) -> None:
         """Atomically write JSON. Caller must hold the lock."""
         self._path.parent.mkdir(parents=True, exist_ok=True)
+        try:
+            os.chmod(self._path.parent, 0o700)
+        except OSError:
+            pass
         # tempfile in same directory so os.replace is atomic (same filesystem)
         fd, tmp_path = tempfile.mkstemp(
             prefix=self._path.name + ".",

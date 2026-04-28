@@ -90,11 +90,25 @@ def _fetch_token(
             "window may already be in use."
         )
     if resp.status_code != 200:
+        # Redact response body — error responses from token endpoints
+        # occasionally echo input or partial data; never include raw text in
+        # exception messages that may end up in logs / Sentry / CI output.
         raise TokenFetchError(
-            f"Guesty token fetch failed (status={resp.status_code}): "
-            f"{resp.text[:300]}"
+            f"Guesty token fetch failed (status={resp.status_code}). "
+            f"Response body redacted (length={len(resp.text)} chars)."
         )
-    data = resp.json()
+    try:
+        data = resp.json()
+    except (ValueError, TypeError):
+        raise TokenFetchError(
+            "Guesty token response was not valid JSON (body redacted)."
+        )
+    if not isinstance(data, dict):
+        raise TokenFetchError("Guesty token response was not a JSON object.")
     if "access_token" not in data:
-        raise TokenFetchError(f"Guesty token response missing access_token: {data}")
+        # Surface keys (without values) for debugging; never the values.
+        raise TokenFetchError(
+            f"Guesty token response missing access_token. "
+            f"Response keys: {sorted(data.keys())} (values redacted)."
+        )
     return data["access_token"], int(data.get("expires_in", _DEFAULT_TTL_S))
