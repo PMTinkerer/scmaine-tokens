@@ -17,6 +17,9 @@ test = [
     "pytest-mock==3.15.1",
 ]
 
+[project.scripts]
+scmaine-tokens-doctor = "scmaine_tokens.doctor:main"
+
 [tool.setuptools.packages.find]
 where = ["src"]
 

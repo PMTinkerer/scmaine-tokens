@@ -105,6 +105,28 @@ multiple workflows on the same day share one token:
 The broker itself handles expiry correctly — cached tokens are always validated
 before use, so a stale cache entry from a previous day will trigger a refresh.
 
+## Security
+
+This package treats tokens as critical infrastructure: cache files are `chmod 0600`,
+the cache directory is `chmod 0700`, every refresh is atomic and locked against
+concurrent writers, and exception messages NEVER include response bodies (which
+could echo tokens on a misbehaving upstream).
+
+For the full threat model — what is protected, what is not, and how to respond
+to a suspected leak — see [THREAT_MODEL.md](./THREAT_MODEL.md).
+
+Audit a machine's cache state at any time:
+
+```bash
+python -m scmaine_tokens.doctor
+# or, after install:
+scmaine-tokens-doctor
+```
+
+Exit code 0 on clean state, 1 on any issue (stale lock, expired token, wrong
+permissions, missing env var). Token values are NEVER printed — only
+`<redacted, len=N>` placeholders.
+
 ## Adding a new service
 
 1. Copy `src/scmaine_tokens/guesty.py` (for OAuth client_credentials) or
