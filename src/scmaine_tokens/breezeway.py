@@ -7,6 +7,7 @@ JWT ``exp`` claim. Falls back to 24h / 30d defaults if JWT parsing fails.
 
 import base64
 import json
+import logging
 import os
 import pathlib
 import time
@@ -16,6 +17,8 @@ import httpx
 
 from scmaine_tokens._cache import FileCache, _resolve_cache_dir
 from scmaine_tokens.errors import ConfigurationError, RateLimitedError, TokenFetchError
+
+logger = logging.getLogger(__name__)
 
 _AUTH_URL = "https://api.breezeway.io/public/auth/v1/"
 _REFRESH_URL = "https://api.breezeway.io/public/auth/v1/refresh"
@@ -89,21 +92,48 @@ def get_breezeway_token(
             if access_token and (access_expires_at - now_ts) > _REFRESH_BUFFER_S:
                 return access_token
 
-            # 2. Access expired but refresh token still fresh — use it.
+            # 2. Access expired but refresh token still fresh — try it.
+            #    The cached `refresh_expires_at` is optimistic: Breezeway can
+            #    revoke or rotate a refresh token before its JWT exp, and
+            #    historically has. If the refresh attempt fails (typically
+            #    401, but any TokenFetchError counts), we MUST fall through
+            #    to full re-auth below — otherwise the broker enters a
+            #    permanent failure loop until refresh_expires_at finally
+            #    elapses (potentially 30 days from now). client_credentials
+            #    is the canonical recovery path. See test
+            #    `test_refresh_401_falls_back_to_full_auth`.
             if refresh_token and (refresh_expires_at - now_ts) > _REFRESH_BUFFER_S:
-                new_access, new_refresh, access_ttl, refresh_ttl = _refresh_auth(
-                    refresh_token, http_client_factory
-                )
-                cache.write({
-                    "access_token": new_access,
-                    "refresh_token": new_refresh,
-                    "access_expires_at": now_ts + access_ttl,
-                    "refresh_expires_at": now_ts + refresh_ttl,
-                    "fetched_at": now_ts,
-                })
-                return new_access
+                try:
+                    new_access, new_refresh, access_ttl, refresh_ttl = _refresh_auth(
+                        refresh_token, http_client_factory
+                    )
+                except TokenFetchError as exc:
+                    logger.warning(
+                        "Breezeway refresh-token call failed (%s); falling "
+                        "back to client_credentials full re-auth.",
+                        exc,
+                    )
+                    # Drop the stale refresh token so we don't try it again
+                    # if full_auth itself transiently fails — the next call
+                    # will start fresh.
+                    cache.write({
+                        "access_token": "",
+                        "refresh_token": "",
+                        "access_expires_at": 0,
+                        "refresh_expires_at": 0,
+                        "fetched_at": now_ts,
+                    })
+                else:
+                    cache.write({
+                        "access_token": new_access,
+                        "refresh_token": new_refresh,
+                        "access_expires_at": now_ts + access_ttl,
+                        "refresh_expires_at": now_ts + refresh_ttl,
+                        "fetched_at": now_ts,
+                    })
+                    return new_access
 
-        # 3. No valid cache, or both tokens expired — full re-auth.
+        # 3. No valid cache, both tokens expired, OR refresh just failed — full re-auth.
         access_token, refresh_token, access_ttl, refresh_ttl = _full_auth(
             cid, csec, http_client_factory
         )
